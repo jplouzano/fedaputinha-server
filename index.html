@@ -1,0 +1,125 @@
+
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Fedaputinha Online</title>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <style>
+    body { background: #1a1a1a; color: white; font-family: sans-serif; padding: 20px; }
+    .card { display: inline-block; background: white; color: black; padding: 10px; margin: 5px; border-radius: 8px; cursor: pointer; transition: all 0.2s; }
+    .card:hover { transform: scale(1.1); box-shadow: 0 0 8px #f1c40f; }
+    .disabled { opacity: 0.4; pointer-events: none; }
+    #log, #chatbox { background: #000; padding: 10px; margin-top: 20px; height: 150px; overflow-y: scroll; font-family: monospace; }
+  </style>
+</head>
+<body>
+  <h2>Fedaputinha Multiplayer</h2>
+
+  <input id="name" placeholder="Seu nome">
+  <input id="room" placeholder="Código da sala">
+  <button onclick="join()">Entrar</button>
+  <button onclick="start()">Iniciar</button>
+  <br><br>
+
+  <div id="status"></div>
+  <div id="players"></div>
+  <div id="hand"></div>
+
+  <input id="bet" type="number" placeholder="Sua aposta">
+  <button onclick="apostar()">Apostar</button>
+
+  <div id="log"></div>
+  <div id="chatbox"></div>
+  <input id="msg" placeholder="Mensagem">
+  <button onclick="sendMsg()">Enviar</button>
+
+  <script>
+    const socket = io("http://localhost:3000");
+    let playerId = null, currentRoom = "", myTurn = false, myHand = [];
+
+    function join() {
+      const name = document.getElementById("name").value;
+      const room = document.getElementById("room").value;
+      currentRoom = room;
+      socket.emit("join", { roomId: room, name });
+    }
+
+    function start() {
+      socket.emit("start", currentRoom);
+    }
+
+    function apostar() {
+      const bet = parseInt(document.getElementById("bet").value);
+      socket.emit("bet", { roomId: currentRoom, playerId: socket.id, bet });
+    }
+
+    function playCard(value, suit) {
+      if (!myTurn) return;
+      socket.emit("play", { roomId: currentRoom, playerId: socket.id, card: { value, suit } });
+      myTurn = false;
+    }
+
+    function sendMsg() {
+      const msg = document.getElementById("msg").value;
+      socket.emit("chat", { roomId: currentRoom, name: document.getElementById("name").value, message: msg });
+      document.getElementById("msg").value = "";
+    }
+
+    socket.on("updatePlayers", players => {
+      document.getElementById("players").innerHTML = `<h4>Jogadores</h4>` + players.map(p => `${p.name} (${p.points} pts)`).join(\'<br>\');
+    });
+
+    socket.on("startBetting", players => {
+      const me = players.find(p => p.id === socket.id);
+      myHand = me.cards;
+      renderHand();
+      log("Fase de apostas iniciada.");
+    });
+
+    socket.on("startPlaying", playerTurnId => {
+      myTurn = playerTurnId === socket.id;
+      document.getElementById("status").innerText = myTurn ? "É sua vez!" : "Aguardando outro jogador...";
+    });
+
+    socket.on("cardPlayed", ({ playerId, card }) => {
+      log(`${playerId === socket.id ? "Você" : playerId} jogou ${card.value} de ${card.suit}`);
+      if (playerId === socket.id) {
+        myHand = myHand.filter(c => !(c.value === card.value && c.suit === card.suit));
+        renderHand();
+      }
+    });
+
+    socket.on("trickResult", ({ winner, trick }) => {
+      trick.forEach(t => log(`${t.playerId} jogou ${t.card.value} de ${t.card.suit}`));
+      log(`🏆 ${winner === socket.id ? "Você venceu a rodada!" : winner + " venceu a rodada."}`);
+    });
+
+    socket.on("roundEnd", players => {
+      log("Rodada finalizada.");
+      setTimeout(() => socket.emit("start", currentRoom), 2000);
+    });
+
+    socket.on("chat", ({ name, message }) => {
+      const chat = document.getElementById("chatbox");
+      chat.innerHTML += `<div><b>${name}:</b> ${message}</div>`;
+      chat.scrollTop = chat.scrollHeight;
+    });
+
+    function renderHand() {
+      const el = document.getElementById("hand");
+      el.innerHTML = \'<h4>Sua Mão</h4>\' + myHand.map(c =>
+        `<div class="card ${myTurn ? \'\' : \'disabled\'}" onclick="playCard(\'${c.value}\',\'${c.suit}\')">${c.value} de ${c.suit}</div>`
+      ).join(\'\');
+    }
+
+    function log(msg) {
+      const el = document.getElementById("log");
+      el.innerHTML += msg + \'<br>\';
+      el.scrollTop = el.scrollHeight;
+    }
+  </script>
+</body>
+</html>
+
+
